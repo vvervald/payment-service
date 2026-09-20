@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"sync"
 )
 
 var (
@@ -94,6 +95,15 @@ func (p *PaymentService) ProcessingTransactions(t Transaction) error {
 	return nil
 }
 
+func (p *PaymentService) worker(tq <-chan Transaction, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for t := range tq {
+		if err := p.ProcessingTransactions(t); err != nil {
+			fmt.Printf("Transaction error: %s\n", err)
+		}
+	}
+}
+
 func main() {
 	u1 := User{
 		ID:      "1",
@@ -103,43 +113,58 @@ func main() {
 
 	u2 := User{
 		ID:      "2",
-		Name:    "user1",
+		Name:    "user2",
 		Balance: 2000.00,
 	}
+	ps := NewPaymentService()
 
-	p := NewPaymentService()
-	p.AddUser(&u1)
-	p.AddUser(&u2)
+	ps.AddUser(&u1)
+	ps.AddUser(&u2)
 
 	t1 := Transaction{
-		u1.ID,
-		u2.ID,
-		4200,
+		FromID: u1.ID,
+		ToID:   u2.ID,
+		Amount: 200,
 	}
-
 	t2 := Transaction{
-		u2.ID,
-		u1.ID,
-		1000,
+		FromID: u1.ID,
+		ToID:   u2.ID,
+		Amount: 300,
 	}
 
 	t3 := Transaction{
-		u2.ID,
-		u1.ID,
-		300,
+		FromID: u1.ID,
+		ToID:   u2.ID,
+		Amount: 500,
 	}
 
-	p.AddTransaction(t1)
-	p.AddTransaction(t2)
-	p.AddTransaction(t3)
-
-	for _, t := range p.Transactions {
-		if err := p.ProcessingTransactions(t); err != nil {
-			fmt.Printf("Transaction error: %s\n ", err)
-		}
+	t4 := Transaction{
+		FromID: u2.ID,
+		ToID:   u1.ID,
+		Amount: 5000,
 	}
+
+	ps.AddTransaction(t1)
+	ps.AddTransaction(t2)
+	ps.AddTransaction(t3)
+	ps.AddTransaction(t4)
+
+	var wg sync.WaitGroup
+	ch := make(chan Transaction, len(ps.Transactions))
+
+	for _, t := range ps.Transactions {
+		ch <- t
+	}
+
+	close(ch)
+
+	for i := 0; i <= 4; i++ {
+		wg.Add(1)
+		go ps.worker(ch, &wg)
+	}
+
+	wg.Wait()
 
 	u1.PrintUserBalance()
 	u2.PrintUserBalance()
-
 }
